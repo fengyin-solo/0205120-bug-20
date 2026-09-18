@@ -72,7 +72,7 @@ async function loadHotels(page) {
                 '<div style="margin:6px 0">' + tags + '</div>' +
                 '<div class="card-meta">' +
                     '<span class="card-price">¥' + (h.price || 0) + '<small>/晚</small></span>' +
-                    '<span class="card-rating">' + renderStars(h.rating || 0) + '</span>' +
+                    '<span class="card-rating">' + renderStars(Math.round(h.rating || 0)) + ' <span style="color:var(--text3);font-size:12px">' + (Number(h.rating) || 0).toFixed(1) + '分 · ' + (h.commentCount || 0) + '条</span></span>' +
                 '</div>' +
             '</div>' +
         '</a>';

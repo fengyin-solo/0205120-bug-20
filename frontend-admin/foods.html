@@ -50,8 +50,8 @@
                     </div>
                     <div class="table-wrapper">
                         <table>
-                            <thead><tr><th>ID</th><th>封面</th><th>名称</th><th>分类</th><th>价格</th><th>门店</th><th>操作</th></tr></thead>
-                            <tbody id="foodBody"><tr><td colspan="7" class="loading"><i class="fas fa-spinner fa-spin"></i> 加载中...</td></tr></tbody>
+                            <thead><tr><th>ID</th><th>封面</th><th>名称</th><th>分类</th><th>价格</th><th>评分/评价数</th><th>门店</th><th>操作</th></tr></thead>
+                            <tbody id="foodBody"><tr><td colspan="8" class="loading"><i class="fas fa-spinner fa-spin"></i> 加载中...</td></tr></tbody>
                         </table>
                     </div>
                     <div class="pagination" id="foodPagination"></div>
@@ -193,13 +193,13 @@ function updateStoreSelect() {
 
 async function loadFoods(page) {
     foodPage = page || 1;
-    document.getElementById('foodBody').innerHTML = '<tr><td colspan="7" class="loading"><i class="fas fa-spinner fa-spin"></i> 加载中...</td></tr>';
+    document.getElementById('foodBody').innerHTML = '<tr><td colspan="8" class="loading"><i class="fas fa-spinner fa-spin"></i> 加载中...</td></tr>';
     const data = await api(`/api/food/list?page=${foodPage}&size=10`);
-    if (!data) { document.getElementById('foodBody').innerHTML = '<tr><td colspan="7" class="empty-state">加载失败</td></tr>'; return; }
+    if (!data) { document.getElementById('foodBody').innerHTML = '<tr><td colspan="8" class="empty-state">加载失败</td></tr>'; return; }
 
     const list = data.records || data.list || data || [];
     const total = data.pages || data.totalPages || Math.ceil((data.total || list.length) / 10);
-    if (!list.length) { document.getElementById('foodBody').innerHTML = '<tr><td colspan="7" class="empty-state"><i class="fas fa-inbox"></i> 暂无数据</td></tr>'; document.getElementById('foodPagination').innerHTML = ''; return; }
+    if (!list.length) { document.getElementById('foodBody').innerHTML = '<tr><td colspan="8" class="empty-state"><i class="fas fa-inbox"></i> 暂无数据</td></tr>'; document.getElementById('foodPagination').innerHTML = ''; return; }
 
     let h = '';
     list.forEach(f => {
@@ -210,6 +210,7 @@ async function loadFoods(page) {
             <td>${escHtml(f.name)}</td>
             <td>${escHtml(f.category || '-')}</td>
             <td>${f.price != null ? '¥' + f.price : '-'}</td>
+            <td>${(Number(f.avgRating) || 0).toFixed(1)} 分 / ${f.commentCount || 0} 条</td>
             <td>${escHtml(f.storeName || '-')}</td>
             <td class="action-btns">
                 <button class="btn btn-sm btn-info" onclick="editFood(${f.id})"><i class="fas fa-edit"></i></button>

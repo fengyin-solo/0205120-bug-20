@@ -44,8 +44,8 @@
                 </div>
                 <div class="table-wrapper">
                     <table>
-                        <thead><tr><th>ID</th><th>封面</th><th>名称</th><th>地区</th><th>主题</th><th>门票价格</th><th>状态</th><th>操作</th></tr></thead>
-                        <tbody id="tableBody"><tr><td colspan="8" class="loading"><i class="fas fa-spinner fa-spin"></i> 加载中...</td></tr></tbody>
+                        <thead><tr><th>ID</th><th>封面</th><th>名称</th><th>地区</th><th>主题</th><th>门票价格</th><th>评分/评价数</th><th>状态</th><th>操作</th></tr></thead>
+                        <tbody id="tableBody"><tr><td colspan="9" class="loading"><i class="fas fa-spinner fa-spin"></i> 加载中...</td></tr></tbody>
                     </table>
                 </div>
                 <div class="pagination" id="pagination"></div>
@@ -105,13 +105,13 @@ let currentPage = 1;
 
 async function loadData(page) {
     currentPage = page;
-    document.getElementById('tableBody').innerHTML = '<tr><td colspan="8" class="loading"><i class="fas fa-spinner fa-spin"></i> 加载中...</td></tr>';
+    document.getElementById('tableBody').innerHTML = '<tr><td colspan="9" class="loading"><i class="fas fa-spinner fa-spin"></i> 加载中...</td></tr>';
     const data = await api(`/api/admin/spot/list?page=${page}&size=10`);
-    if (!data) { document.getElementById('tableBody').innerHTML = '<tr><td colspan="8" class="empty-state">加载失败</td></tr>'; return; }
+    if (!data) { document.getElementById('tableBody').innerHTML = '<tr><td colspan="9" class="empty-state">加载失败</td></tr>'; return; }
 
     const list = data.records || data.list || data || [];
     const total = data.pages || data.totalPages || Math.ceil((data.total || list.length) / 10);
-    if (!list.length) { document.getElementById('tableBody').innerHTML = '<tr><td colspan="8" class="empty-state"><i class="fas fa-inbox"></i> 暂无数据</td></tr>'; document.getElementById('pagination').innerHTML = ''; return; }
+    if (!list.length) { document.getElementById('tableBody').innerHTML = '<tr><td colspan="9" class="empty-state"><i class="fas fa-inbox"></i> 暂无数据</td></tr>'; document.getElementById('pagination').innerHTML = ''; return; }
 
     let h = '';
     list.forEach(s => {
@@ -126,6 +126,7 @@ async function loadData(page) {
             <td>${escHtml(s.region || '-')}</td>
             <td>${escHtml(s.theme || '-')}</td>
             <td>${s.ticketPrice != null ? '¥' + s.ticketPrice : '-'}</td>
+            <td>${(Number(s.avgRating) || 0).toFixed(1)} 分 / ${s.commentCount || 0} 条</td>
             <td>${statusBadge}</td>
             <td class="action-btns">
                 <button class="btn btn-sm btn-info" onclick="editItem(${s.id})"><i class="fas fa-edit"></i></button>

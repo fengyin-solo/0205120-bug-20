@@ -148,7 +148,7 @@
         </div>
 
         <div style="margin-top:40px;background:var(--card);border-radius:var(--r);padding:24px;box-shadow:var(--shadow)">
-            <h3 style="margin-bottom:20px;font-size:18px"><i class="fas fa-comments" style="color:var(--red);margin-right:8px"></i>游客评论</h3>
+            <h3 style="margin-bottom:20px;font-size:18px"><i class="fas fa-comments" style="color:var(--red);margin-right:8px"></i>游客评论 <span id="commentCountText" style="font-size:13px;color:var(--text3);font-weight:400"></span></h3>
             <div id="commentList"><div class="loading"><div class="spinner"></div></div></div>
             <div id="commentPagination" class="pagination"></div>
 
@@ -315,7 +315,7 @@ async function loadDetail() {
 
     const avgRating = parseFloat(spotData.avgRating || 0);
     const stars = avgRating > 0 ? renderStars(Math.round(avgRating)) + ` <span style="font-size:12px;opacity:.8">${avgRating.toFixed(1)}</span>` : renderStars(5);
-    document.getElementById('spotRating').innerHTML = stars;
+    document.getElementById('spotRating').innerHTML = stars + ` <span style="font-size:12px;opacity:.8">(${spotData.commentCount || 0}条评价)</span>`;
     document.getElementById('spotViews').innerHTML = `<i class="fas fa-eye"></i> ${(spotData.viewCount || 0).toLocaleString()} 浏览`;
 
     document.getElementById('infoLocation').textContent = spotData.location || '--';
@@ -481,6 +481,7 @@ async function loadComments(page) {
 
     const list = res.records || res.list || res;
     const total = res.total || (Array.isArray(res) ? res.length : 0);
+    document.getElementById('commentCountText').textContent = total ? `（共 ${total} 条）` : '';
 
     if (!list || list.length === 0) {
         container.innerHTML = '<div class="empty"><i class="fas fa-comment-slash"></i><p>暂无评论，来做第一个评价的人吧</p></div>';
@@ -488,20 +489,42 @@ async function loadComments(page) {
         return;
     }
 
-    container.innerHTML = list.map(c => `
+    const me = getUser();
+    container.innerHTML = list.map(c => {
+        const canDelete = me && (me.role === 'ADMIN' || String(me.id) === String(c.userId));
+        return `
         <div class="comment-item">
-            <div class="comment-avatar">${c.userAvatar ? `<img src="${API + c.userAvatar}" alt="avatar">` : (c.nickname || c.username || '游').charAt(0)}</div>
+            <div class="comment-avatar">${c.userAvatar ? `<img src="${API + c.userAvatar}" alt="avatar">` : (c.username || '游').charAt(0)}</div>
             <div class="comment-body">
-                <span class="name">${c.nickname || c.username || '匿名用户'}</span>
+                <span class="name">${c.username || '匿名用户'}
+                    ${canDelete ? `<a href="javascript:void(0)" style="float:right;font-size:12px;color:#ff4d4f;font-weight:400" onclick="deleteMyComment(${c.id})"><i class="fas fa-trash-alt"></i> 删除</a>` : ''}
+                </span>
                 <span class="time">${formatDate(c.createTime)}</span>
                 <div class="rating">${renderStars(c.rating || 0)}</div>
                 <div class="text">${c.content || ''}</div>
-                ${c.reply ? `<div class="comment-reply"><strong>商家回复：</strong>${c.reply}</div>` : ''}
+                ${c.replyContent ? `<div class="comment-reply"><strong>管理员回复：</strong>${c.replyContent}</div>` : ''}
             </div>
-        </div>
-    `).join('');
+        </div>`;
+    }).join('');
 
     renderPagination(document.getElementById('commentPagination'), commentPage, total, 10, 'loadComments');
+}
+
+async function deleteMyComment(id) {
+    if (!getUser()) { showToast('请先登录', 'error'); return; }
+    showConfirm('确定删除这条评价吗？删除后评分与条数会立即重新计算。', async () => {
+        const resp = await apiPost('/api/comment/delete?id=' + id);
+        if (!resp || resp.code !== 200) {
+            if (resp && resp.code === 403) showToast(resp.msg || '只能删除自己的评价', 'error');
+            return;
+        }
+        showToast('删除成功');
+        // 当前页删空时自动回退上一页，并刷新头部评分
+        const shown = document.querySelectorAll('#commentList .comment-item').length;
+        if (shown <= 1 && commentPage > 1) loadComments(commentPage - 1);
+        else loadComments(commentPage);
+        loadDetail();
+    });
 }
 
 function selectStar(v) {
@@ -522,6 +545,7 @@ async function submitComment() {
         document.getElementById('commentContent').value = '';
         selectStar(5);
         loadComments(1);
+        loadDetail();
     }
 }
 

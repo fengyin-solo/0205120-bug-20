@@ -6,6 +6,18 @@
     <title>管理后台 - 留言管理</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="css/admin.css">
+    <style>
+        .batch-bar {display:flex;gap:10px;align-items:center;margin-bottom:12px}
+        .batch-bar .selected-tip {font-size:13px;color:#666}
+        .batch-result-list {max-height:300px;overflow:auto;border:1px solid #eee;border-radius:6px;margin:12px 0}
+        .batch-result-list .ri {display:flex;align-items:center;gap:10px;padding:8px 12px;font-size:13px;border-bottom:1px solid #f5f5f5}
+        .batch-result-list .ri:last-child {border-bottom:none}
+        .batch-result-list .ri.ok {color:#52c41a}
+        .batch-result-list .ri.fail {color:#ff4d4f}
+        .batch-result-list .ri .rid {color:#999;min-width:60px}
+        .batch-result-list .ri .rmsg {flex:1}
+        .batch-summary {font-size:14px;font-weight:600;margin:8px 0}
+    </style>
 </head>
 <body>
 <div class="admin-layout">
@@ -42,10 +54,18 @@
                     <input class="form-control" id="fKeyword" placeholder="搜索留言内容" onkeydown="if(event.key==='Enter')loadData(1)">
                     <button class="btn btn-primary" onclick="loadData(1)"><i class="fas fa-search"></i> 搜索</button>
                 </div>
+                <div class="batch-bar">
+                    <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+                        <input type="checkbox" id="checkAll" onchange="toggleCheckAll(this.checked)"> 全选本页
+                    </label>
+                    <button class="btn btn-danger btn-sm" onclick="batchDelete()"><i class="fas fa-trash-alt"></i> 批量删除</button>
+                    <span class="selected-tip" id="selectedTip">未选择</span>
+                    <span class="selected-tip" id="totalTip" style="margin-left:auto"></span>
+                </div>
                 <div class="table-wrapper">
                     <table>
-                        <thead><tr><th>ID</th><th>用户</th><th>类型</th><th>内容</th><th>评分</th><th>回复</th><th>时间</th><th>操作</th></tr></thead>
-                        <tbody id="tableBody"><tr><td colspan="8" class="loading"><i class="fas fa-spinner fa-spin"></i> 加载中...</td></tr></tbody>
+                        <thead><tr><th style="width:40px"></th><th>ID</th><th>用户</th><th>类型</th><th>对象ID</th><th>内容</th><th>评分</th><th>回复</th><th>时间</th><th>操作</th></tr></thead>
+                        <tbody id="tableBody"><tr><td colspan="10" class="loading"><i class="fas fa-spinner fa-spin"></i> 加载中...</td></tr></tbody>
                     </table>
                 </div>
                 <div class="pagination" id="pagination"></div>
@@ -75,47 +95,98 @@
     </div>
 </div>
 
+<div class="modal-overlay" id="batchResultModal">
+    <div class="modal" style="max-width:520px">
+        <div class="modal-header"><h3>批量删除结果</h3><button class="modal-close" onclick="closeBatchResult()">&times;</button></div>
+        <div class="modal-body">
+            <div class="batch-summary" id="batchSummary"></div>
+            <div class="batch-result-list" id="batchResultList"></div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-default" onclick="closeBatchResult()">关闭</button>
+            <button class="btn btn-danger" id="retryFailedBtn" style="display:none" onclick="retryFailed()"><i class="fas fa-redo"></i> 重试失败项（<span id="retryCount">0</span>）</button>
+        </div>
+    </div>
+</div>
+
 <script src="js/admin-common.js"></script>
 <script>
 if (!requireAdmin()) throw '';
 renderSidebar();
 
+const PAGE_SIZE = 10;
 let currentPage = 1;
+let totalRecords = 0;
+let lastFailedIds = [];
+const TYPE_LABELS = {SPOT:'景点', HOTEL:'酒店', FOOD:'美食', ROUTE:'线路', CULTURE:'文化'};
 
 async function loadData(page) {
     currentPage = page;
     const keyword = document.getElementById('fKeyword').value.trim();
-    let url = `/api/admin/comment/list?page=${page}&size=10`;
+    let url = `/api/admin/comment/list?page=${page}&size=${PAGE_SIZE}`;
     if (keyword) url += `&keyword=${encodeURIComponent(keyword)}`;
 
-    document.getElementById('tableBody').innerHTML = '<tr><td colspan="8" class="loading"><i class="fas fa-spinner fa-spin"></i> 加载中...</td></tr>';
+    document.getElementById('tableBody').innerHTML = '<tr><td colspan="10" class="loading"><i class="fas fa-spinner fa-spin"></i> 加载中...</td></tr>';
     const data = await api(url);
-    if (!data) { document.getElementById('tableBody').innerHTML = '<tr><td colspan="8" class="empty-state">加载失败</td></tr>'; return; }
+    if (!data) { document.getElementById('tableBody').innerHTML = '<tr><td colspan="10" class="empty-state">加载失败</td></tr>'; return; }
 
     const list = data.records || data.list || data || [];
-    const total = data.pages || data.totalPages || Math.ceil((data.total || list.length) / 10);
-    if (!list.length) { document.getElementById('tableBody').innerHTML = '<tr><td colspan="8" class="empty-state"><i class="fas fa-inbox"></i> 暂无数据</td></tr>'; document.getElementById('pagination').innerHTML = ''; return; }
+    totalRecords = data.total != null ? data.total : list.length;
+    const totalPages = data.pages || Math.max(1, Math.ceil(totalRecords / PAGE_SIZE));
+    document.getElementById('totalTip').textContent = '共 ' + totalRecords + ' 条评价';
+    if (!list.length) {
+        document.getElementById('tableBody').innerHTML = '<tr><td colspan="10" class="empty-state"><i class="fas fa-inbox"></i> 暂无数据</td></tr>';
+        document.getElementById('pagination').innerHTML = '';
+        updateSelectedTip();
+        return;
+    }
 
     let h = '';
     list.forEach(c => {
         const content = escHtml(c.content || '').substring(0, 60) + ((c.content || '').length > 60 ? '...' : '');
         const reply = c.replyContent ? `<span style="color:#52c41a" title="${escHtml(c.replyContent)}">已回复</span>` : '<span style="color:#999">未回复</span>';
+        const typeLabel = TYPE_LABELS[c.targetType] || escHtml(c.targetType || '-');
         h += `<tr>
+            <td><input type="checkbox" class="row-check" value="${c.id}" onchange="onRowCheck()"></td>
             <td>${c.id}</td>
             <td>${escHtml(c.username || c.nickname || '-')}</td>
-            <td>${escHtml(c.targetType || c.type || '-')}</td>
+            <td>${typeLabel}</td>
+            <td>${c.targetId || '-'}</td>
             <td title="${escHtml(c.content)}">${content}</td>
             <td>${renderStars(c.rating || c.score)}</td>
             <td>${reply}</td>
             <td>${formatDate(c.createTime || c.createdAt)}</td>
             <td class="action-btns">
-                <button class="btn btn-sm btn-info" onclick="openReplyModal(${c.id}, '${escHtml(c.content || '').replace(/'/g, "\\'")}')"><i class="fas fa-reply"></i></button>
-                <button class="btn btn-sm btn-danger" onclick="deleteItem(${c.id})"><i class="fas fa-trash"></i></button>
+                <button class="btn btn-sm btn-info" title="回复" onclick="openReplyModal(${c.id}, '${escHtml(c.content || '').replace(/'/g, "\\'")}')"><i class="fas fa-reply"></i></button>
+                <button class="btn btn-sm btn-danger" title="删除" onclick="deleteItem(${c.id})"><i class="fas fa-trash"></i></button>
             </td>
         </tr>`;
     });
     document.getElementById('tableBody').innerHTML = h;
-    renderPagination('pagination', currentPage, total, 'loadData');
+    document.getElementById('checkAll').checked = false;
+    updateSelectedTip();
+    renderPagination('pagination', currentPage, totalPages, 'loadData');
+}
+
+function getSelectedIds() {
+    return Array.from(document.querySelectorAll('.row-check:checked')).map(cb => parseInt(cb.value));
+}
+
+function toggleCheckAll(checked) {
+    document.querySelectorAll('.row-check').forEach(cb => { cb.checked = checked; });
+    updateSelectedTip();
+}
+
+function onRowCheck() {
+    const all = document.querySelectorAll('.row-check');
+    const checked = document.querySelectorAll('.row-check:checked');
+    document.getElementById('checkAll').checked = all.length > 0 && checked.length === all.length;
+    updateSelectedTip();
+}
+
+function updateSelectedTip() {
+    const n = document.querySelectorAll('.row-check:checked').length;
+    document.getElementById('selectedTip').textContent = n === 0 ? '未选择' : `已选择 ${n} 条`;
 }
 
 function openReplyModal(id, content) {
@@ -135,11 +206,87 @@ async function submitReply() {
 }
 
 function deleteItem(id) {
-    showConfirm('确定要删除该留言吗？', async () => {
-        const data = await api('/api/admin/comment/delete?id=' + id);
-        if (data !== null) { showToast('删除成功'); loadData(currentPage); }
+    showConfirm('确定要删除该评价吗？删除后平均分与条数会立即重新计算。', async () => {
+        const resp = await apiPost('/api/admin/comment/delete?id=' + id);
+        if (!resp || resp.code !== 200) return;
+        showToast('删除成功');
+        reloadAfterDelete(1);
     });
 }
+
+async function batchDelete() {
+    const ids = getSelectedIds();
+    if (!ids.length) { showToast('请先勾选要删除的评价', 'warning'); return; }
+    const btn = document.querySelector('.batch-bar .btn-danger');
+    showConfirm(`确定批量删除选中的 ${ids.length} 条评价吗？将逐条反馈结果。`, async () => {
+        if (btn) { btn.disabled = true; btn.style.opacity = '.6'; }
+        try {
+            const resp = await apiPost('/api/admin/comment/batchDelete', ids);
+            if (!resp) return;
+            if (resp.code !== 200) { showToast(resp.msg || '批量删除失败', 'error'); return; }
+            showBatchResult(resp.data || {});
+            // 按删除成功条数推算新的总条数，超出范围则回退到最后一页，不再停在旧分页
+            const successCount = (resp.data && resp.data.successCount) || 0;
+            reloadAfterDelete(successCount);
+        } finally {
+            if (btn) { btn.disabled = false; btn.style.opacity = ''; }
+        }
+    });
+}
+
+/** 按新总条数把当前页收敛到合法范围，解决删除后分页/总条数停留在旧值的问题 */
+function reloadAfterDelete(removedCount) {
+    const remaining = Math.max(0, totalRecords - removedCount);
+    const maxPage = Math.max(1, Math.ceil(remaining / PAGE_SIZE));
+    loadData(Math.min(currentPage, maxPage));
+}
+
+function showBatchResult(data) {
+    const results = data.results || [];
+    const failed = results.filter(r => !r.success);
+    lastFailedIds = failed.map(r => r.id).filter(id => id != null);
+
+    document.getElementById('batchSummary').innerHTML =
+        `共处理 <b>${data.total || results.length}</b> 条：` +
+        `<span style="color:#52c41a">成功 ${data.successCount || 0}</span>，` +
+        `<span style="color:${failed.length ? '#ff4d4f' : '#999'}">失败 ${data.failCount || 0}</span>`;
+
+    document.getElementById('batchResultList').innerHTML = results.map(r =>
+        `<div class="ri ${r.success ? 'ok' : 'fail'}">
+            <span class="rid">#${r.id == null ? '-' : r.id}</span>
+            <i class="fas ${r.success ? 'fa-check-circle' : 'fa-times-circle'}"></i>
+            <span class="rmsg">${escHtml(r.msg || (r.success ? '成功' : '失败'))}</span>
+        </div>`
+    ).join('');
+
+    const retryBtn = document.getElementById('retryFailedBtn');
+    if (lastFailedIds.length) {
+        retryBtn.style.display = '';
+        document.getElementById('retryCount').textContent = lastFailedIds.length;
+    } else {
+        retryBtn.style.display = 'none';
+    }
+    document.getElementById('batchResultModal').classList.add('active');
+}
+
+async function retryFailed() {
+    if (!lastFailedIds.length) return;
+    const ids = lastFailedIds.slice();
+    closeBatchResult();
+    const btn = document.getElementById('retryFailedBtn');
+    if (btn) { btn.disabled = true; btn.style.opacity = '.6'; }
+    try {
+        const resp = await apiPost('/api/admin/comment/batchDelete', ids);
+        if (!resp) return;
+        if (resp.code !== 200) { showToast(resp.msg || '重试失败', 'error'); return; }
+        showBatchResult(resp.data || {});
+        loadData(currentPage);
+    } finally {
+        if (btn) { btn.disabled = false; btn.style.opacity = ''; }
+    }
+}
+
+function closeBatchResult() { document.getElementById('batchResultModal').classList.remove('active'); }
 
 loadData(1);
 </script>

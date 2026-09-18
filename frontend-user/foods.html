@@ -87,6 +87,7 @@ async function loadFoods(page) {
                 '<p>' + (f.description || f.intro || '') + '</p>' +
                 '<div class="card-meta">' +
                     '<span class="card-price">¥' + (f.price || 0) + '</span>' +
+                    '<span class="card-rating">' + renderStars(Math.round(f.avgRating || 0)) + ' <span style="color:var(--text3);font-size:12px">' + (Number(f.avgRating) || 0).toFixed(1) + '分 · ' + (f.commentCount || 0) + '条</span></span>' +
                 '</div>' +
             '</div>' +
         '</a>'

@@ -10,6 +10,19 @@ async function api(path) {
     return (data.data !== null && data.data !== undefined) ? data.data : true;
 }
 
+/** POST JSON 写请求，避免浏览器对 GET 写接口做启发式缓存 */
+async function apiPost(path, body) {
+    const res = await fetch(API + path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: body === undefined ? null : JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (data.code === 401) { clearUser(); showToast('请先登录', 'error'); setTimeout(() => location.href = 'login.html', 1000); return null; }
+    return data;
+}
+
 function showConfirm(msg, onOk) {
     const id = 'cfm' + Date.now();
     const div = document.createElement('div');

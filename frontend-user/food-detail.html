@@ -73,11 +73,23 @@
                 </div>
                 <button class="btn btn-primary" onclick="buyFood()" style="font-size:16px;padding:12px 32px"><i class="fas fa-shopping-cart"></i> 立即购买</button>
             </div>
+
+            <div style="margin-top:40px;padding-top:24px;border-top:1px solid var(--border)">
+                <h3 style="margin-bottom:16px">用户评价 <span id="commentCountText" style="font-size:13px;color:var(--text3);font-weight:400"></span></h3>
+                <div class="comment-form">
+                    <div class="rating-select" id="ratingSelect"></div>
+                    <textarea id="commentText" placeholder="写下你对这道美食的评价..."></textarea>
+                    <button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="submitComment()">提交评价</button>
+                </div>
+                <div id="commentList"></div>
+                <div class="pagination" id="commentPagination"></div>
+            </div>
         </div>
         <div class="detail-sidebar">
             <div class="sidebar-card">
                 <h3>美食图片</h3>
                 <img id="foodCover" style="width:100%;border-radius:6px" alt="">
+                <div id="foodRating" style="margin-top:12px;font-size:13px"></div>
             </div>
             <div class="sidebar-card" id="relatedSection" style="display:none">
                 <h3>同类推荐</h3>
@@ -145,6 +157,7 @@
 <script>
 const foodId = getParam('id');
 let food = null, lastOrderId = null, payMethod = 'WECHAT';
+let commentPage = 1, selectedRating = 5;
 
 if (!foodId) { location.href = 'foods.html'; }
 
@@ -173,10 +186,87 @@ async function loadDetail() {
         coverEl.src = food.coverImage ? (API + food.coverImage) : '';
     }
     document.getElementById('foodDesc').innerHTML = '<p style="font-size:15px;line-height:1.8;color:var(--text)">' + (food.description || '暂无介绍') + '</p>';
+    document.getElementById('foodRating').innerHTML = renderStars(Math.round(food.avgRating || 0)) +
+        ' <strong>' + (Number(food.avgRating) || 0).toFixed(1) + '</strong>' +
+        ' <span style="color:var(--text3)">(' + (food.commentCount || 0) + '条评价)</span>';
     document.title = (food.name || '美食详情') + ' - 贵州红色旅游';
     updateSubtotal();
     if (food.storeId) loadStore(food.storeId);
     if (food.category) loadRelated(food.category);
+}
+
+/* ========== 评价 ========== */
+function initRatingSelect() {
+    const el = document.getElementById('ratingSelect');
+    el.innerHTML = '<span style="font-size:14px;color:var(--text2)">评分：</span>';
+    for (let i = 1; i <= 5; i++) {
+        el.innerHTML += '<i class="fas fa-star star ' + (i <= selectedRating ? 'active' : '') + '" onclick="setRating(' + i + ')" style="font-size:22px;cursor:pointer;margin:0 2px;color:' + (i <= selectedRating ? 'var(--gold,#faad14)' : '#ddd') + '"></i>';
+    }
+}
+function setRating(r) {
+    selectedRating = r;
+    document.querySelectorAll('#ratingSelect .star').forEach((s, i) => {
+        s.classList.toggle('active', i < r);
+        s.style.color = i < r ? 'var(--gold,#faad14)' : '#ddd';
+    });
+}
+
+async function loadComments(page) {
+    commentPage = page;
+    const data = await api('/api/comment/list?targetType=FOOD&targetId=' + foodId + '&page=' + page + '&size=10');
+    const el = document.getElementById('commentList');
+    if (!data) { el.innerHTML = '<div class="empty"><p>暂无评价</p></div>'; return; }
+    const list = data.records || data.list || data;
+    const total = data.total || list.length;
+    document.getElementById('commentCountText').textContent = total ? '（共 ' + total + ' 条）' : '';
+    if (!list.length) { el.innerHTML = '<div class="empty"><i class="fas fa-comment-slash"></i><p>暂无评价</p></div>'; document.getElementById('commentPagination').innerHTML = ''; return; }
+    const me = getUser();
+    el.innerHTML = list.map(c => {
+        const canDelete = me && (me.role === 'ADMIN' || String(me.id) === String(c.userId));
+        return '<div class="comment-item">' +
+            '<div class="comment-avatar">' + (c.userAvatar ? ('<img src="' + API + c.userAvatar + '" alt="avatar">') : ((c.username || '?').charAt(0).toUpperCase())) + '</div>' +
+            '<div class="comment-body">' +
+                '<span class="name">' + (c.username || '匿名') +
+                    (canDelete ? ' <a href="javascript:void(0)" style="float:right;font-size:12px;color:#ff4d4f;font-weight:400" onclick="deleteMyComment(' + c.id + ')"><i class="fas fa-trash-alt"></i> 删除</a>' : '') +
+                '</span>' +
+                '<span class="time">' + formatDate(c.createTime) + '</span>' +
+                '<div class="rating">' + renderStars(c.rating || 0) + '</div>' +
+                '<div class="text">' + (c.content || '') + '</div>' +
+                (c.replyContent ? '<div class="comment-reply"><strong>管理员回复：</strong>' + c.replyContent + '</div>' : '') +
+            '</div>' +
+        '</div>';
+    }).join('');
+    renderPagination(document.getElementById('commentPagination'), commentPage, total, 10, 'loadComments');
+}
+
+async function deleteMyComment(id) {
+    if (!getUser()) { showToast('请先登录', 'error'); return; }
+    showConfirm('确定删除这条评价吗？删除后评分与条数会立即重新计算。', async () => {
+        const resp = await apiPost('/api/comment/delete?id=' + id);
+        if (!resp || resp.code !== 200) {
+            if (resp && resp.code === 403) showToast(resp.msg || '只能删除自己的评价', 'error');
+            return;
+        }
+        showToast('删除成功');
+        const shown = document.querySelectorAll('#commentList .comment-item').length;
+        if (shown <= 1 && commentPage > 1) loadComments(commentPage - 1);
+        else loadComments(commentPage);
+        loadDetail();
+    });
+}
+
+async function submitComment() {
+    if (!getUser()) { showToast('请先登录', 'error'); setTimeout(function(){ location.href = 'login.html'; }, 1000); return; }
+    const content = document.getElementById('commentText').value.trim();
+    if (!content) { showToast('请输入评价内容', 'warn'); return; }
+    const data = await api('/api/comment/add?targetType=FOOD&targetId=' + foodId + '&content=' + encodeURIComponent(content) + '&rating=' + selectedRating);
+    if (data !== null) {
+        showToast('评价成功');
+        document.getElementById('commentText').value = '';
+        setRating(5);
+        loadComments(1);
+        loadDetail();
+    }
 }
 
 async function loadStore(storeId) {
@@ -243,6 +333,8 @@ async function confirmPay() {
 
 document.getElementById('qty').addEventListener('input', updateSubtotal);
 loadDetail();
+initRatingSelect();
+loadComments(1);
 </script>
 </body>
 </html>

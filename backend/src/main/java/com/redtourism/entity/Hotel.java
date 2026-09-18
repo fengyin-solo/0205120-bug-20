@@ -23,6 +23,7 @@ public class Hotel implements Serializable {
     private String phone;
     private Integer status;
     private Double rating;
+    private Long commentCount;
     private Double longitude;
     private Double latitude;
     @TableField(fill = FieldFill.INSERT)

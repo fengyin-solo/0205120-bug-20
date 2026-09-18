@@ -492,8 +492,11 @@ public class AdminController {
                                         @RequestParam String replyContent,
                                         HttpSession session) {
         User admin = (User) session.getAttribute(Constants.SESSION_USER);
+        if (admin == null || !Constants.ROLE_ADMIN.equals(admin.getRole())) {
+            return Result.error(403, "仅管理员可回复留言");
+        }
         Comment comment = interactionService.getCommentById(id);
-        interactionService.replyComment(id, replyContent, admin != null ? admin.getId() : null);
+        interactionService.replyComment(id, replyContent, admin.getId());
         if (comment != null && comment.getUserId() != null) {
             messageService.sendMessage(comment.getUserId(), "您的留言收到了回复",
                     "管理员回复了您的留言：" + replyContent);
@@ -501,10 +504,51 @@ public class AdminController {
         return Result.success("回复成功", null);
     }
 
+    @PostMapping("/comment/delete")
+    public Result<String> deleteComment(@RequestParam Long id, HttpSession session) {
+        return doDeleteComment(id, session);
+    }
+
+    /** 兼容旧的 GET 调用，同样要求管理员身份 */
     @GetMapping("/comment/delete")
-    public Result<String> deleteComment(@RequestParam Long id) {
-        interactionService.deleteComment(id);
+    public Result<String> deleteCommentGet(@RequestParam Long id, HttpSession session) {
+        return doDeleteComment(id, session);
+    }
+
+    private Result<String> doDeleteComment(Long id, HttpSession session) {
+        User admin = (User) session.getAttribute(Constants.SESSION_USER);
+        if (admin == null) return Result.error(401, "请先登录");
+        try {
+            interactionService.deleteComment(id, admin);
+        } catch (SecurityException e) {
+            return Result.error(403, e.getMessage());
+        }
         return Result.success("删除成功", null);
+    }
+
+    /**
+     * 批量删除评价：逐条执行、逐条反馈。
+     * 任意单条失败都会在结果中明确标注，原评价保留，前端可仅对失败项重试。
+     */
+    @PostMapping("/comment/batchDelete")
+    public Result<Map<String, Object>> batchDeleteComments(@RequestBody List<Long> ids,
+                                                            HttpSession session) {
+        User admin = (User) session.getAttribute(Constants.SESSION_USER);
+        if (admin == null) return Result.error(401, "请先登录");
+        if (ids == null || ids.isEmpty()) return Result.error("请先勾选要删除的评价");
+        List<com.redtourism.dto.CommentDeleteResult> results = interactionService.deleteComments(ids, admin);
+        int success = 0, fail = 0;
+        for (com.redtourism.dto.CommentDeleteResult r : results) {
+            if (r.isSuccess()) success++; else fail++;
+        }
+        Map<String, Object> data = new HashMap<>();
+        data.put("results", results);
+        data.put("total", results.size());
+        data.put("successCount", success);
+        data.put("failCount", fail);
+        String msg = fail == 0 ? "全部删除成功（" + success + " 条）"
+                : "成功 " + success + " 条，失败 " + fail + " 条，失败的评价已保留，可重试";
+        return Result.success(msg, data);
     }
 
     // ==================== 订单管理 ====================

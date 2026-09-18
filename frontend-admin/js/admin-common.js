@@ -8,6 +8,22 @@ async function api(path) {
     return (data.data !== null && data.data !== undefined) ? data.data : true;
 }
 
+/**
+ * POST JSON 请求，写操作统一使用 POST，避免浏览器缓存 GET 写请求。
+ * 返回完整响应体（{code,msg,data}），调用方可读取逐条结果等扩展信息。
+ */
+async function apiPost(path, body) {
+    const res = await fetch(API + path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: body === undefined ? null : JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (data.code === 401) { showToast('请先登录', 'error'); setTimeout(() => location.href = 'login.html', 1000); return null; }
+    return data;
+}
+
 function showConfirm(msg, onOk) {
     const id = 'cfm' + Date.now();
     const div = document.createElement('div');
