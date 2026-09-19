@@ -41,11 +41,16 @@
                 <div class="filter-bar">
                     <input class="form-control" id="fKeyword" placeholder="搜索留言内容" onkeydown="if(event.key==='Enter')loadData(1)">
                     <button class="btn btn-primary" onclick="loadData(1)"><i class="fas fa-search"></i> 搜索</button>
+                    <button class="btn btn-danger" id="batchDeleteBtn" onclick="batchDelete()" disabled><i class="fas fa-trash"></i> 批量删除</button>
+                    <span id="totalInfo" style="margin-left:auto;color:#666;font-size:13px"></span>
                 </div>
                 <div class="table-wrapper">
                     <table>
-                        <thead><tr><th>ID</th><th>用户</th><th>类型</th><th>内容</th><th>评分</th><th>回复</th><th>时间</th><th>操作</th></tr></thead>
-                        <tbody id="tableBody"><tr><td colspan="8" class="loading"><i class="fas fa-spinner fa-spin"></i> 加载中...</td></tr></tbody>
+                        <thead><tr>
+                            <th style="width:36px"><input type="checkbox" id="checkAll" onchange="toggleCheckAll(this)"></th>
+                            <th>ID</th><th>用户</th><th>类型</th><th>内容</th><th>评分</th><th>回复</th><th>时间</th><th>操作</th>
+                        </tr></thead>
+                        <tbody id="tableBody"><tr><td colspan="9" class="loading"><i class="fas fa-spinner fa-spin"></i> 加载中...</td></tr></tbody>
                     </table>
                 </div>
                 <div class="pagination" id="pagination"></div>
@@ -75,12 +80,28 @@
     </div>
 </div>
 
+<!-- 批量删除结果反馈 -->
+<div class="modal-overlay" id="batchResultModal">
+    <div class="modal">
+        <div class="modal-header"><h3>批量删除结果</h3><button class="modal-close" onclick="closeBatchResultModal()">&times;</button></div>
+        <div class="modal-body">
+            <div id="batchResultSummary" style="margin-bottom:12px;font-size:14px"></div>
+            <div id="batchResultList" style="max-height:300px;overflow-y:auto"></div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-default" onclick="closeBatchResultModal()">关闭</button>
+            <button class="btn btn-danger" id="retryFailedBtn" onclick="retryFailed()" style="display:none"><i class="fas fa-redo"></i> 重试失败项</button>
+        </div>
+    </div>
+</div>
+
 <script src="js/admin-common.js"></script>
 <script>
 if (!requireAdmin()) throw '';
 renderSidebar();
 
 let currentPage = 1;
+let lastFailedIds = [];
 
 async function loadData(page) {
     currentPage = page;
@@ -88,19 +109,29 @@ async function loadData(page) {
     let url = `/api/admin/comment/list?page=${page}&size=10`;
     if (keyword) url += `&keyword=${encodeURIComponent(keyword)}`;
 
-    document.getElementById('tableBody').innerHTML = '<tr><td colspan="8" class="loading"><i class="fas fa-spinner fa-spin"></i> 加载中...</td></tr>';
+    document.getElementById('tableBody').innerHTML = '<tr><td colspan="9" class="loading"><i class="fas fa-spinner fa-spin"></i> 加载中...</td></tr>';
     const data = await api(url);
-    if (!data) { document.getElementById('tableBody').innerHTML = '<tr><td colspan="8" class="empty-state">加载失败</td></tr>'; return; }
+    if (!data) { document.getElementById('tableBody').innerHTML = '<tr><td colspan="9" class="empty-state">加载失败</td></tr>'; return; }
 
     const list = data.records || data.list || data || [];
-    const total = data.pages || data.totalPages || Math.ceil((data.total || list.length) / 10);
-    if (!list.length) { document.getElementById('tableBody').innerHTML = '<tr><td colspan="8" class="empty-state"><i class="fas fa-inbox"></i> 暂无数据</td></tr>'; document.getElementById('pagination').innerHTML = ''; return; }
+    // 当前页已被删空且不是第一页时，自动回退一页，避免分页与总数停在删除前状态
+    if (!list.length && page > 1) { loadData(page - 1); return; }
+
+    const totalPages = data.pages || data.totalPages || Math.ceil((data.total || list.length) / 10);
+    document.getElementById('totalInfo').textContent = `共 ${data.total != null ? data.total : list.length} 条`;
+    if (!list.length) {
+        document.getElementById('tableBody').innerHTML = '<tr><td colspan="9" class="empty-state"><i class="fas fa-inbox"></i> 暂无数据</td></tr>';
+        document.getElementById('pagination').innerHTML = '';
+        updateBatchBtn();
+        return;
+    }
 
     let h = '';
     list.forEach(c => {
         const content = escHtml(c.content || '').substring(0, 60) + ((c.content || '').length > 60 ? '...' : '');
         const reply = c.replyContent ? `<span style="color:#52c41a" title="${escHtml(c.replyContent)}">已回复</span>` : '<span style="color:#999">未回复</span>';
         h += `<tr>
+            <td><input type="checkbox" class="row-check" data-id="${c.id}" onchange="updateBatchBtn()"></td>
             <td>${c.id}</td>
             <td>${escHtml(c.username || c.nickname || '-')}</td>
             <td>${escHtml(c.targetType || c.type || '-')}</td>
@@ -115,7 +146,33 @@ async function loadData(page) {
         </tr>`;
     });
     document.getElementById('tableBody').innerHTML = h;
-    renderPagination('pagination', currentPage, total, 'loadData');
+    renderPagination('pagination', currentPage, totalPages, 'loadData');
+    // 批量删除后：上次失败的条目保持勾选，便于直接重试
+    if (lastFailedIds.length) {
+        document.querySelectorAll('.row-check').forEach(cb => {
+            if (lastFailedIds.includes(Number(cb.dataset.id))) cb.checked = true;
+        });
+    }
+    updateBatchBtn();
+}
+
+function toggleCheckAll(el) {
+    document.querySelectorAll('.row-check').forEach(cb => cb.checked = el.checked);
+    updateBatchBtn();
+}
+
+function getCheckedIds() {
+    return Array.from(document.querySelectorAll('.row-check:checked')).map(cb => Number(cb.dataset.id));
+}
+
+function updateBatchBtn() {
+    const n = getCheckedIds().length;
+    const btn = document.getElementById('batchDeleteBtn');
+    btn.disabled = n === 0;
+    btn.innerHTML = `<i class="fas fa-trash"></i> 批量删除${n ? '（' + n + '）' : ''}`;
+    const checkAll = document.getElementById('checkAll');
+    const all = document.querySelectorAll('.row-check');
+    checkAll.checked = all.length > 0 && n === all.length;
 }
 
 function openReplyModal(id, content) {
@@ -140,6 +197,46 @@ function deleteItem(id) {
         if (data !== null) { showToast('删除成功'); loadData(currentPage); }
     });
 }
+
+function batchDelete() {
+    const ids = getCheckedIds();
+    if (!ids.length) { showToast('请先勾选要删除的留言', 'warning'); return; }
+    showConfirm(`确定要删除选中的 ${ids.length} 条留言吗？`, () => doBatchDelete(ids));
+}
+
+async function doBatchDelete(ids) {
+    const data = await api('/api/admin/comment/batchDelete?ids=' + ids.join(','));
+    if (data === null) return;
+    const items = data.items || [];
+    const failed = items.filter(i => !i.success);
+    lastFailedIds = failed.map(i => i.id);
+    showBatchResult(data, failed);
+    loadData(currentPage);
+}
+
+function retryFailed() {
+    if (!lastFailedIds.length) return;
+    closeBatchResultModal();
+    doBatchDelete(lastFailedIds);
+}
+
+function showBatchResult(data, failed) {
+    const summary = document.getElementById('batchResultSummary');
+    if (!failed.length) {
+        summary.innerHTML = `<span style="color:#52c41a"><i class="fas fa-check-circle"></i> 全部删除成功（共 ${data.successCount} 条）</span>`;
+    } else {
+        summary.innerHTML = `<span style="color:#faad14"><i class="fas fa-exclamation-circle"></i> 成功 ${data.successCount} 条，失败 ${data.failCount} 条</span>
+            <div style="font-size:12px;color:#999;margin-top:4px">失败的留言已保留在列表中并保持勾选，可直接重试。</div>`;
+    }
+    document.getElementById('batchResultList').innerHTML = (data.items || []).map(i =>
+        `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f0f0f0;font-size:13px">
+            <span>留言 #${i.id}</span>
+            <span style="color:${i.success ? '#52c41a' : '#ff4d4f'}">${i.success ? '删除成功' : escHtml(i.message || '删除失败')}</span>
+        </div>`).join('');
+    document.getElementById('retryFailedBtn').style.display = failed.length ? '' : 'none';
+    document.getElementById('batchResultModal').classList.add('active');
+}
+function closeBatchResultModal() { document.getElementById('batchResultModal').classList.remove('active'); }
 
 loadData(1);
 </script>

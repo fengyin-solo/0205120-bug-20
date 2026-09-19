@@ -34,6 +34,8 @@
         <div class="meta">
             <span id="foodCategory" class="meta-item theme-badge"><i class="fas fa-tag"></i></span>
             <span id="foodPrice" class="meta-item" style="font-weight:700;font-size:15px"></span>
+            <span id="foodRating" class="meta-item rating-badge"></span>
+            <span id="foodCommentCount" class="meta-item"></span>
         </div>
     </div>
 </div>
@@ -72,6 +74,17 @@
                     </div>
                 </div>
                 <button class="btn btn-primary" onclick="buyFood()" style="font-size:16px;padding:12px 32px"><i class="fas fa-shopping-cart"></i> 立即购买</button>
+            </div>
+
+            <div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--border)">
+                <h3 style="margin-bottom:16px">用户评价（<span id="commentTotal">0</span>）</h3>
+                <div class="comment-form" id="commentForm">
+                    <div class="rating-select" id="ratingSelect"></div>
+                    <textarea id="commentText" placeholder="写下你的评价..."></textarea>
+                    <button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="submitComment()">提交评价</button>
+                </div>
+                <div id="commentList"></div>
+                <div class="pagination" id="commentPagination"></div>
             </div>
         </div>
         <div class="detail-sidebar">
@@ -145,6 +158,7 @@
 <script>
 const foodId = getParam('id');
 let food = null, lastOrderId = null, payMethod = 'WECHAT';
+let commentPage = 1, selectedRating = 5;
 
 if (!foodId) { location.href = 'foods.html'; }
 
@@ -173,10 +187,81 @@ async function loadDetail() {
         coverEl.src = food.coverImage ? (API + food.coverImage) : '';
     }
     document.getElementById('foodDesc').innerHTML = '<p style="font-size:15px;line-height:1.8;color:var(--text)">' + (food.description || '暂无介绍') + '</p>';
+    document.getElementById('foodRating').innerHTML = renderStars(Math.round(food.rating || 0)) + ' ' + (food.rating || 0);
+    document.getElementById('foodCommentCount').innerHTML = '<i class="fas fa-comment"></i> ' + (food.commentCount || 0) + ' 条评价';
     document.title = (food.name || '美食详情') + ' - 贵州红色旅游';
     updateSubtotal();
+    initRatingSelect();
     if (food.storeId) loadStore(food.storeId);
     if (food.category) loadRelated(food.category);
+}
+
+function initRatingSelect() {
+    var el = document.getElementById('ratingSelect');
+    el.innerHTML = '<span>评分：</span>';
+    for (var i = 1; i <= 5; i++) {
+        el.innerHTML += '<i class="fas fa-star star ' + (i <= selectedRating ? 'active' : '') + '" onclick="setRating(' + i + ')"></i>';
+    }
+}
+
+function setRating(r) {
+    selectedRating = r;
+    document.querySelectorAll('#ratingSelect .star').forEach(function(s, i) { s.classList.toggle('active', i < r); });
+}
+
+async function loadComments(page) {
+    commentPage = page;
+    var data = await api('/api/comment/list?targetType=FOOD&targetId=' + foodId + '&page=' + page + '&size=10');
+    var el = document.getElementById('commentList');
+    if (!data) { el.innerHTML = '<div class="empty"><i class="fas fa-comment-slash"></i><p>暂无评价</p></div>'; return; }
+    var list = data.records || data.list || data;
+    var total = data.total || list.length;
+    // 当前页被删空且不是第一页时，自动回退一页，保证分页与总数实时一致
+    if (!list.length && page > 1) { loadComments(page - 1); return; }
+    document.getElementById('commentTotal').textContent = total;
+    if (!list.length) { el.innerHTML = '<div class="empty"><i class="fas fa-comment-slash"></i><p>暂无评价</p></div>'; document.getElementById('commentPagination').innerHTML = ''; return; }
+    var me = getUser();
+    el.innerHTML = list.map(function(c) {
+        var canDelete = me && (me.id == c.userId || me.role === 'ADMIN');
+        return '<div class="comment-item">' +
+            '<div class="comment-avatar">' + (c.userAvatar ? ('<img src="' + API + c.userAvatar + '" alt="avatar">') : ((c.nickname || c.username || '?').charAt(0).toUpperCase())) + '</div>' +
+            '<div class="comment-body">' +
+                '<span class="name">' + (c.nickname || c.username || '匿名') + '</span>' +
+                '<span class="time">' + formatDate(c.createTime || c.createdAt) + '</span>' +
+                (canDelete ? '<a style="float:right;color:#bbb;font-size:12px;cursor:pointer" onmouseover="this.style.color=\'var(--red)\'" onmouseout="this.style.color=\'#bbb\'" onclick="deleteComment(' + c.id + ')"><i class="fas fa-trash-alt"></i> 删除</a>' : '') +
+                '<div class="rating">' + renderStars(c.rating || 0) + '</div>' +
+                '<div class="text">' + (c.content || '') + '</div>' +
+                (c.reply ? '<div class="comment-reply"><strong>商家回复：</strong>' + c.reply + '</div>' : '') +
+            '</div>' +
+        '</div>';
+    }).join('');
+    renderPagination(document.getElementById('commentPagination'), commentPage, total, 10, 'loadComments');
+}
+
+function deleteComment(id) {
+    if (!getUser()) { showToast('请先登录', 'error'); return; }
+    showConfirm('确定要删除这条评价吗？', async function() {
+        var data = await api('/api/comment/delete?id=' + id);
+        if (data !== null) {
+            showToast('删除成功');
+            loadComments(commentPage);
+            loadDetail(); // 同步刷新评分与评价数
+        }
+    });
+}
+
+async function submitComment() {
+    if (!getUser()) { showToast('请先登录', 'error'); return; }
+    var content = document.getElementById('commentText').value.trim();
+    if (!content) { showToast('请输入评价内容', 'warn'); return; }
+    var data = await api('/api/comment/add?targetType=FOOD&targetId=' + foodId + '&content=' + encodeURIComponent(content) + '&rating=' + selectedRating);
+    if (data !== null) {
+        showToast('评价成功');
+        document.getElementById('commentText').value = '';
+        setRating(5);
+        loadComments(1);
+        loadDetail(); // 同步刷新评分与评价数
+    }
 }
 
 async function loadStore(storeId) {
@@ -243,6 +328,7 @@ async function confirmPay() {
 
 document.getElementById('qty').addEventListener('input', updateSubtotal);
 loadDetail();
+loadComments(1);
 </script>
 </body>
 </html>

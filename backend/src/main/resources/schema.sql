@@ -132,6 +132,7 @@ CREATE TABLE IF NOT EXISTS hotel (
     phone VARCHAR(20),
     status INT DEFAULT 1,
     rating DOUBLE DEFAULT 0,
+    comment_count BIGINT DEFAULT 0,
     longitude DOUBLE,
     latitude DOUBLE,
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -146,6 +147,8 @@ CREATE TABLE IF NOT EXISTS food (
     price DECIMAL(10,2),
     cover_image VARCHAR(255),
     store_id BIGINT,
+    rating DOUBLE DEFAULT 0,
+    comment_count BIGINT DEFAULT 0,
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
     update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

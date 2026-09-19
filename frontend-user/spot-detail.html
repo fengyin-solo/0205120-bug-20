@@ -48,6 +48,7 @@
             <span id="spotLocation" class="meta-item"><i class="fas fa-map-marker-alt"></i> --</span>
             <span id="spotTheme" class="meta-item theme-badge"></span>
             <span id="spotRating" class="meta-item rating-badge"></span>
+            <span id="spotCommentCount" class="meta-item"><i class="fas fa-comment"></i> 0 条评价</span>
             <span id="spotViews" class="meta-item views-badge"><i class="fas fa-eye"></i> --</span>
         </div>
     </div>
@@ -148,7 +149,7 @@
         </div>
 
         <div style="margin-top:40px;background:var(--card);border-radius:var(--r);padding:24px;box-shadow:var(--shadow)">
-            <h3 style="margin-bottom:20px;font-size:18px"><i class="fas fa-comments" style="color:var(--red);margin-right:8px"></i>游客评论</h3>
+            <h3 style="margin-bottom:20px;font-size:18px"><i class="fas fa-comments" style="color:var(--red);margin-right:8px"></i>游客评论（<span id="commentTotal">0</span>）</h3>
             <div id="commentList"><div class="loading"><div class="spinner"></div></div></div>
             <div id="commentPagination" class="pagination"></div>
 
@@ -316,6 +317,7 @@ async function loadDetail() {
     const avgRating = parseFloat(spotData.avgRating || 0);
     const stars = avgRating > 0 ? renderStars(Math.round(avgRating)) + ` <span style="font-size:12px;opacity:.8">${avgRating.toFixed(1)}</span>` : renderStars(5);
     document.getElementById('spotRating').innerHTML = stars;
+    document.getElementById('spotCommentCount').innerHTML = `<i class="fas fa-comment"></i> ${spotData.commentCount || 0} 条评价`;
     document.getElementById('spotViews').innerHTML = `<i class="fas fa-eye"></i> ${(spotData.viewCount || 0).toLocaleString()} 浏览`;
 
     document.getElementById('infoLocation').textContent = spotData.location || '--';
@@ -482,26 +484,46 @@ async function loadComments(page) {
     const list = res.records || res.list || res;
     const total = res.total || (Array.isArray(res) ? res.length : 0);
 
+    // 当前页被删空且不是第一页时，自动回退一页，保证分页与总数实时一致
+    if ((!list || list.length === 0) && page > 1) { loadComments(page - 1); return; }
+
+    document.getElementById('commentTotal').textContent = total;
     if (!list || list.length === 0) {
         container.innerHTML = '<div class="empty"><i class="fas fa-comment-slash"></i><p>暂无评论，来做第一个评价的人吧</p></div>';
         document.getElementById('commentPagination').innerHTML = '';
         return;
     }
 
-    container.innerHTML = list.map(c => `
+    const me = getUser();
+    container.innerHTML = list.map(c => {
+        const canDelete = me && (me.id == c.userId || me.role === 'ADMIN');
+        return `
         <div class="comment-item">
             <div class="comment-avatar">${c.userAvatar ? `<img src="${API + c.userAvatar}" alt="avatar">` : (c.nickname || c.username || '游').charAt(0)}</div>
             <div class="comment-body">
                 <span class="name">${c.nickname || c.username || '匿名用户'}</span>
                 <span class="time">${formatDate(c.createTime)}</span>
+                ${canDelete ? `<a style="float:right;color:#bbb;font-size:12px;cursor:pointer" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='#bbb'" onclick="deleteComment(${c.id})"><i class="fas fa-trash-alt"></i> 删除</a>` : ''}
                 <div class="rating">${renderStars(c.rating || 0)}</div>
                 <div class="text">${c.content || ''}</div>
                 ${c.reply ? `<div class="comment-reply"><strong>商家回复：</strong>${c.reply}</div>` : ''}
             </div>
-        </div>
-    `).join('');
+        </div>`;
+    }).join('');
 
     renderPagination(document.getElementById('commentPagination'), commentPage, total, 10, 'loadComments');
+}
+
+function deleteComment(id) {
+    if (!requireLogin()) return;
+    showConfirm('确定要删除这条评论吗？', async () => {
+        const res = await api(`/api/comment/delete?id=${id}`);
+        if (res !== null) {
+            showToast('删除成功');
+            loadComments(commentPage);
+            loadDetail(); // 同步刷新平均分与评价数
+        }
+    });
 }
 
 function selectStar(v) {
@@ -522,6 +544,7 @@ async function submitComment() {
         document.getElementById('commentContent').value = '';
         selectStar(5);
         loadComments(1);
+        loadDetail(); // 同步刷新平均分与评价数
     }
 }
 

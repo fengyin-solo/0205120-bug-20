@@ -35,6 +35,7 @@
             <span id="hotelLocation" class="meta-item"><i class="fas fa-map-marker-alt"></i></span>
             <span id="hotelPrice" class="meta-item" style="font-weight:700;font-size:15px"></span>
             <span id="hotelRating" class="meta-item rating-badge"></span>
+            <span id="hotelCommentCount" class="meta-item"></span>
         </div>
     </div>
 </div>
@@ -51,7 +52,7 @@
                 <button class="btn btn-primary" onclick="openBookModal()" style="font-size:16px;padding:12px 32px"><i class="fas fa-calendar-check"></i> 立即预订</button>
             </div>
             <div style="margin-top:40px">
-                <h3 style="margin-bottom:16px">用户评价</h3>
+                <h3 style="margin-bottom:16px">用户评价（<span id="commentTotal">0</span>）</h3>
                 <div class="comment-form" id="commentForm">
                     <div class="rating-select" id="ratingSelect"></div>
                     <textarea id="commentText" placeholder="写下你的评价..."></textarea>
@@ -159,7 +160,8 @@ async function loadDetail() {
     document.getElementById('hotelName').textContent = hotel.name || '';
     document.getElementById('hotelLocation').innerHTML = '<i class="fas fa-map-marker-alt"></i> ' + (hotel.location || hotel.address || '');
     document.getElementById('hotelPrice').innerHTML = '¥' + (hotel.price || 0) + '/晚';
-    document.getElementById('hotelRating').innerHTML = renderStars(hotel.rating || 0);
+    document.getElementById('hotelRating').innerHTML = renderStars(Math.round(hotel.rating || 0)) + ' ' + (hotel.rating || 0);
+    document.getElementById('hotelCommentCount').innerHTML = '<i class="fas fa-comment"></i> ' + (hotel.commentCount || 0) + ' 条评价';
     var coverEl = document.getElementById('hotelCover');
     if (coverEl) {
         coverEl.onerror = function(){ imgError(coverEl); };
@@ -256,20 +258,38 @@ async function loadComments(page) {
     if (!data) { el.innerHTML = '<div class="empty"><i class="fas fa-comment-slash"></i><p>暂无评价</p></div>'; return; }
     const list = data.records || data.list || data;
     const total = data.total || list.length;
+    // 当前页被删空且不是第一页时，自动回退一页，保证分页与总数实时一致
+    if (!list.length && page > 1) { loadComments(page - 1); return; }
+    document.getElementById('commentTotal').textContent = total;
     if (!list.length) { el.innerHTML = '<div class="empty"><i class="fas fa-comment-slash"></i><p>暂无评价</p></div>'; document.getElementById('commentPagination').innerHTML = ''; return; }
-    el.innerHTML = list.map(c =>
-        '<div class="comment-item">' +
+    const me = getUser();
+    el.innerHTML = list.map(c => {
+        const canDelete = me && (me.id == c.userId || me.role === 'ADMIN');
+        return '<div class="comment-item">' +
             '<div class="comment-avatar">' + (c.userAvatar ? ('<img src="' + API + c.userAvatar + '" alt="avatar">') : ((c.nickname || c.username || '?').charAt(0).toUpperCase())) + '</div>' +
             '<div class="comment-body">' +
                 '<span class="name">' + (c.nickname || c.username || '匿名') + '</span>' +
                 '<span class="time">' + formatDate(c.createTime || c.createdAt) + '</span>' +
+                (canDelete ? '<a style="float:right;color:#bbb;font-size:12px;cursor:pointer" onmouseover="this.style.color=\'var(--red)\'" onmouseout="this.style.color=\'#bbb\'" onclick="deleteComment(' + c.id + ')"><i class="fas fa-trash-alt"></i> 删除</a>' : '') +
                 '<div class="rating">' + renderStars(c.rating || 0) + '</div>' +
                 '<div class="text">' + (c.content || '') + '</div>' +
                 (c.reply ? '<div class="comment-reply"><strong>商家回复：</strong>' + c.reply + '</div>' : '') +
             '</div>' +
-        '</div>'
-    ).join('');
+        '</div>';
+    }).join('');
     renderPagination(document.getElementById('commentPagination'), commentPage, total, 10, 'loadComments');
+}
+
+function deleteComment(id) {
+    if (!getUser()) { showToast('请先登录', 'error'); return; }
+    showConfirm('确定要删除这条评价吗？', async () => {
+        const data = await api('/api/comment/delete?id=' + id);
+        if (data !== null) {
+            showToast('删除成功');
+            loadComments(commentPage);
+            loadDetail(); // 同步刷新评分与评价数
+        }
+    });
 }
 
 async function submitComment() {
@@ -281,6 +301,7 @@ async function submitComment() {
         showToast('评价成功');
         document.getElementById('commentText').value = '';
         loadComments(1);
+        loadDetail(); // 同步刷新评分与评价数
     }
 }
 

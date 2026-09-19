@@ -19,6 +19,8 @@ public class Food implements Serializable {
     private BigDecimal price;
     private String coverImage;
     private Long storeId;
+    private Double rating;
+    private Long commentCount;
     @TableField(fill = FieldFill.INSERT)
     private Date createTime;
     @TableField(fill = FieldFill.INSERT_UPDATE)

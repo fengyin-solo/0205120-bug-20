@@ -17,6 +17,7 @@ import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
 import java.io.PrintWriter;
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -502,9 +503,30 @@ public class AdminController {
     }
 
     @GetMapping("/comment/delete")
-    public Result<String> deleteComment(@RequestParam Long id) {
-        interactionService.deleteComment(id);
+    public Result<String> deleteComment(@RequestParam Long id, HttpSession session) {
+        User admin = (User) session.getAttribute(Constants.SESSION_USER);
+        interactionService.deleteComment(id, admin);
         return Result.success("删除成功", null);
+    }
+
+    @GetMapping("/comment/batchDelete")
+    public Result<Map<String, Object>> batchDeleteComments(@RequestParam String ids, HttpSession session) {
+        User admin = (User) session.getAttribute(Constants.SESSION_USER);
+        if (admin == null) return Result.error(401, "请先登录");
+        List<Long> idList = new ArrayList<>();
+        for (String s : ids.split(",")) {
+            s = s.trim();
+            if (!s.isEmpty()) {
+                idList.add(Long.parseLong(s));
+            }
+        }
+        if (idList.isEmpty()) return Result.error(400, "请选择要删除的评论");
+        Map<String, Object> result = interactionService.batchDeleteComments(idList, admin);
+        int successCount = (Integer) result.get("successCount");
+        int failCount = (Integer) result.get("failCount");
+        String msg = failCount == 0 ? "全部删除成功（共 " + successCount + " 条）"
+                : "成功 " + successCount + " 条，失败 " + failCount + " 条";
+        return Result.success(msg, result);
     }
 
     // ==================== 订单管理 ====================

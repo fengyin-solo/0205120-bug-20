@@ -135,6 +135,7 @@ docker compose up --build -d
 | `GET /api/like/add?targetType=&targetId=` | 点赞/取消点赞 |
 | `GET /api/comment/add?targetType=&targetId=&content=&rating=` | 发表评论 |
 | `GET /api/comment/list?targetType=&targetId=&page=&size=` | 评论列表 |
+| `GET /api/comment/delete?id=` | 删除评论（仅评论本人或管理员，删除后自动重算评分与评论数） |
 | `GET /api/message/list?page=&size=` | 消息通知列表 |
 | `GET /api/message/unreadCount` | 未读消息数 |
 
@@ -181,7 +182,7 @@ docker compose up --build -d
 | `GET /api/admin/culture/*` | 文化内容 CRUD |
 | `GET /api/admin/hotel/*` | 酒店 CRUD |
 | `GET /api/admin/food/*` | 美食 CRUD |
-| `GET /api/admin/comment/*` | 留言管理（list/reply/delete） |
+| `GET /api/admin/comment/*` | 留言管理（list/reply/delete/batchDelete，批量删除逐条反馈结果） |
 | `GET /api/admin/order/*` | 订单管理（list/complete/cancel/refund/delete） |
 | `GET /api/admin/faq/*` | FAQ CRUD |
 | `GET /api/admin/feedback/*` | 反馈管理（list/reply/status/delete） |
